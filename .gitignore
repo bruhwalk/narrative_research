@@ -1,0 +1,19 @@
+# OS/editor noise
+.DS_Store
+
+# Python/Jupyter artifacts
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Keep archive folder in git, but not its local heavy data files
+data/archive/*
+!data/archive/.gitkeep
+
+# Nested repository metadata should not be committed into a parent repo
+temporal_rag/.git/
