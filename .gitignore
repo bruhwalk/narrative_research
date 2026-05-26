@@ -16,4 +16,4 @@ data/archive/*
 !data/archive/.gitkeep
 
 # Nested repository metadata should not be committed into a parent repo
-temporal_rag/.git/
+temporal_retrieve_virality_signals/.git/
