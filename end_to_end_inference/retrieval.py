@@ -40,6 +40,59 @@ def slugify_encoder_name(name: str) -> str:
     return re.sub(r"_+", "_", value).strip("_")
 
 
+class LocalHashingEncoder:
+    """Dependency-light encoder for smoke tests and offline runs.
+
+    It is not a replacement for E5 quality, but it keeps the same `encode`
+    interface and allows the full pipeline to run on machines without a cached
+    Hugging Face model or a working PyTorch runtime.
+    """
+
+    def __init__(self, n_features: int = 384):
+        from sklearn.feature_extraction.text import HashingVectorizer
+
+        self.n_features = int(n_features)
+        self.vectorizer = HashingVectorizer(
+            n_features=self.n_features,
+            analyzer="char_wb",
+            ngram_range=(3, 5),
+            alternate_sign=False,
+            norm="l2",
+            lowercase=True,
+        )
+
+    def encode(
+        self,
+        texts: list[str],
+        batch_size: int = 64,
+        show_progress_bar: bool = False,
+        normalize_embeddings: bool = True,
+    ) -> np.ndarray:
+        matrix = self.vectorizer.transform([str(text) for text in texts])
+        arr = matrix.astype(np.float32).toarray()
+        if normalize_embeddings:
+            norm = np.linalg.norm(arr, axis=1, keepdims=True)
+            arr = arr / np.maximum(norm, 1e-12)
+        return np.ascontiguousarray(arr, dtype=np.float32)
+
+
+def _local_hashing_dim(encoder_name: str) -> Optional[int]:
+    if not encoder_name.startswith("local-hashing"):
+        return None
+    match = re.search(r"(\d+)$", encoder_name)
+    return int(match.group(1)) if match else 384
+
+
+def _build_encoder(encoder_name: str, device: str):
+    hashing_dim = _local_hashing_dim(encoder_name)
+    if hashing_dim is not None:
+        return LocalHashingEncoder(n_features=hashing_dim)
+
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(encoder_name, device=device)
+
+
 @dataclass
 class IndexBundle:
     df: pd.DataFrame
@@ -73,7 +126,6 @@ def build_index(
     """Build and persist FAISS + BM25 artifacts."""
     import faiss
     from rank_bm25 import BM25Okapi
-    from sentence_transformers import SentenceTransformer
 
     paths = _paths(index_dir, encoder_name)
     paths["root"].mkdir(parents=True, exist_ok=True)
@@ -86,7 +138,7 @@ def build_index(
     corpus_tok = [tokenize_ru(text) for text in corpus["message"].tolist()]
     BM25Okapi(corpus_tok)
 
-    encoder = SentenceTransformer(encoder_name, device=device)
+    encoder = _build_encoder(encoder_name, device)
     doc_inputs = ["passage: " + text for text in corpus["message"].tolist()]
     embeddings = encoder.encode(
         doc_inputs,
@@ -121,7 +173,6 @@ def load_index(
     """Load persisted retrieval artifacts."""
     import faiss
     from rank_bm25 import BM25Okapi
-    from sentence_transformers import SentenceTransformer
 
     paths = _paths(index_dir, encoder_name)
     missing = [str(p) for key, p in paths.items() if key != "root" and not p.exists()]
@@ -134,7 +185,7 @@ def load_index(
     with open(paths["bm25"], "rb") as fh:
         corpus_tok = pickle.load(fh)
     bm25 = BM25Okapi(corpus_tok)
-    encoder = SentenceTransformer(encoder_name, device=device)
+    encoder = _build_encoder(encoder_name, device)
     return IndexBundle(df=df, encoder=encoder, faiss_index=faiss_index, bm25=bm25, encoder_name=encoder_name, device=device)
 
 
@@ -529,4 +580,3 @@ def build_context_for_row(
         iqr_k=iqr_k,
     )
     return context, raw, kept
-

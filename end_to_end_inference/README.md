@@ -39,6 +39,59 @@ export OLLAMA_API_KEY=...
 
 Для локальной Ollama обычно достаточно запущенного сервера `ollama serve`.
 
+## Быстрый Retrieval Service
+
+Если уже есть готовые notebook embeddings в:
+
+`temporal_retrieve_virality_signals/notebooks/embeddings`
+
+можно не пересчитывать документы, а поднять простой HTTP-сервис. Он держит в памяти:
+
+- `.npy` embeddings;
+- FAISS index;
+- `rowmap.csv`;
+- таблицу новостей;
+- опциональный query encoder для новых текстов.
+
+Один раз скачать encoder в локальную папку:
+
+```bash
+python -m end_to_end_inference.cache_encoder \
+  --model intfloat/multilingual-e5-small \
+  --output end_to_end_inference/models/multilingual-e5-small
+```
+
+Запустить сервис без обращения к Hugging Face:
+
+```bash
+python -m end_to_end_inference.simple_retrieval_service \
+  --host 127.0.0.1 \
+  --port 8765 \
+  --embedding-key e5-small \
+  --encoder-path end_to_end_inference/models/multilingual-e5-small
+```
+
+Проверить:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+Получить контекст для новой новости:
+
+```bash
+curl -X POST http://127.0.0.1:8765/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "ЦБ сохранил ключевую ставку и обновил прогноз по инфляции",
+    "anchor_date": "2025-07-26",
+    "window_days": 30,
+    "top_k": 20
+  }'
+```
+
+Для E5 важно, что документы были посчитаны как `passage: <текст>`, а новые запросы сервис считает как `query: <текст>`. Если encoder недоступен, можно запустить с `--no-query-encoder`: тогда dense retrieval работает только по уже известному `message_id`, а произвольный текст ищется через BM25.
+
 ## 1. Построить Индекс
 
 Индекс строится один раз. По умолчанию используется корпус:
@@ -66,6 +119,15 @@ python -m end_to_end_inference build-index \
 ```
 
 На машине с CUDA можно заменить `--device cpu` на `--device cuda`.
+
+Для smoke test без Hugging Face и PyTorch можно использовать локальный hashing encoder. Он нужен только для проверки механики pipeline, качество retrieval ниже, чем у E5:
+
+```bash
+python -m end_to_end_inference build-index \
+  --corpus end_to_end_inference/outputs/smoke_corpus.csv \
+  --index-dir end_to_end_inference/outputs/smoke_index \
+  --encoder-name local-hashing-384
+```
 
 Пересчитать `viral_final` при сборке индекса:
 
