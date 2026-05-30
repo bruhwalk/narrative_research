@@ -25,6 +25,8 @@ import numpy as np
 import pandas as pd
 from rank_bm25 import BM25Okapi
 
+from .llm_client import OllamaChatClient, OllamaConfig, parse_json_object, validate_annotation_payload
+from .prompts import NARRATIVE_SYSTEM_PROMPT, build_annotation_prompt
 from .retrieval import build_daily_context, tokenize_ru
 
 
@@ -294,6 +296,40 @@ class PrecomputedRetrievalIndex:
             "candidates": json.loads(candidates.to_json(orient="records", force_ascii=False)),
         }
 
+    def annotate_response(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model = _clean_text(payload.get("model") or payload.get("llm_model") or "")
+        if not model:
+            raise ValueError("model or llm_model is required for /annotate")
+
+        retrieval = self.retrieve_response(payload)
+        message = _clean_text(payload.get("message", ""))
+        message_id = payload.get("message_id")
+        if not message and message_id is not None and str(message_id) in self.id_to_row:
+            message = str(self.df.iloc[self.id_to_row[str(message_id)]]["message"])
+        if not message:
+            raise ValueError("message or known message_id is required for /annotate")
+
+        topic = _clean_text(payload.get("topic", ""))
+        prompt = build_annotation_prompt(message, topic, retrieval["context"])
+        client = OllamaChatClient(
+            OllamaConfig(
+                model=model,
+                host=_clean_text(payload.get("ollama_host", "")) or None,
+                api_key=_clean_text(payload.get("ollama_api_key", "")) or None,
+                timeout_s=int(payload.get("timeout_s", 120)),
+                temperature=float(payload.get("temperature", 0.2)),
+                num_predict=int(payload.get("num_predict", 2048)),
+            )
+        )
+        raw_response = client.generate(prompt, system=NARRATIVE_SYSTEM_PROMPT)
+        parsed = validate_annotation_payload(parse_json_object(raw_response))
+        return {
+            "model": model,
+            "annotation": parsed,
+            "llm_raw_response": raw_response,
+            "retrieval": retrieval,
+        }
+
 
 class RetrievalHandler(BaseHTTPRequestHandler):
     index: PrecomputedRetrievalIndex
@@ -324,14 +360,17 @@ class RetrievalHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        if self.path != "/retrieve":
+        if self.path not in {"/retrieve", "/annotate"}:
             self._send_json(404, {"error": "not found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length).decode("utf-8")
             payload = json.loads(raw or "{}")
-            self._send_json(200, self.index.retrieve_response(payload))
+            if self.path == "/retrieve":
+                self._send_json(200, self.index.retrieve_response(payload))
+            else:
+                self._send_json(200, self.index.annotate_response(payload))
         except Exception as exc:
             self._send_json(400, {"error": f"{type(exc).__name__}: {exc}"})
 

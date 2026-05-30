@@ -1,0 +1,11 @@
+.git
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+end_to_end_inference/models/
+end_to_end_inference/outputs/
+end_to_end_inference/indexes/
+archive/
+tmp_notebooks/

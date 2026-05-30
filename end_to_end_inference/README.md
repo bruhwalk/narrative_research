@@ -92,6 +92,69 @@ curl -X POST http://127.0.0.1:8765/retrieve \
 
 Для E5 важно, что документы были посчитаны как `passage: <текст>`, а новые запросы сервис считает как `query: <текст>`. Если encoder недоступен, можно запустить с `--no-query-encoder`: тогда dense retrieval работает только по уже известному `message_id`, а произвольный текст ищется через BM25.
 
+Получить сразу LLM-разметку поверх найденного контекста:
+
+```bash
+curl -X POST http://127.0.0.1:8765/annotate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "ЦБ сохранил ключевую ставку и обновил прогноз по инфляции",
+    "topic": "monetary_policy",
+    "anchor_date": "2025-07-26",
+    "window_days": 30,
+    "top_k": 20,
+    "model": "qwen3-vl:235b-instruct-cloud"
+  }'
+```
+
+`/annotate` делает два шага:
+
+1. вызывает тот же retrieval и собирает `context`;
+2. отправляет `message + topic + context` в Ollama и возвращает `annotation`, `llm_raw_response` и использованный `retrieval`.
+
+Для Ollama Cloud используй `OLLAMA_HOST` и `OLLAMA_API_KEY`. Для локальной Ollama оставь `OLLAMA_HOST` пустым или укажи `http://127.0.0.1:11434`.
+
+## Docker
+
+Docker image содержит код сервиса, tracked embeddings и `dataset_tg_economic.parquet`. Локальная модель encoder-а не вшивается в image и не коммитится в git: она монтируется из `end_to_end_inference/models`.
+
+Подготовить локальную модель на машине:
+
+```bash
+python -m end_to_end_inference.cache_encoder \
+  --model intfloat/multilingual-e5-small \
+  --output end_to_end_inference/models/multilingual-e5-small
+```
+
+Собрать и запустить:
+
+```bash
+docker compose up --build retrieval-service
+```
+
+Проверить:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+Если LLM работает через Ollama Cloud:
+
+```bash
+export OLLAMA_HOST=https://ollama.com
+export OLLAMA_API_KEY=...
+docker compose up --build retrieval-service
+```
+
+Если LLM работает через локальную Ollama на хост-машине, для контейнера удобнее указать host alias:
+
+```bash
+export OLLAMA_HOST=http://host.docker.internal:11434
+docker compose up --build retrieval-service
+```
+
+После этого `/annotate` будет получать контекст внутри Docker-контейнера и отправлять финальный prompt в Ollama.
+
 ## 1. Построить Индекс
 
 Индекс строится один раз. По умолчанию используется корпус:

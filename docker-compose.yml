@@ -1,0 +1,13 @@
+services:
+  retrieval-service:
+    build:
+      context: .
+      dockerfile: end_to_end_inference/Dockerfile
+    image: narrative-retrieval-service:latest
+    ports:
+      - "8765:8765"
+    environment:
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+    volumes:
+      - ./end_to_end_inference/models:/models:ro
