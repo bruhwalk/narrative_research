@@ -17,3 +17,10 @@ data/archive/*
 
 # Nested repository metadata should not be committed into a parent repo
 temporal_retrieve_virality_signals/.git/
+
+# Graph experiment: keep folder structure, ignore heavy local inputs/outputs
+narratives_graph/data/*
+!narratives_graph/data/.gitkeep
+!narratives_graph/data/markup_dataset_filled_20260220.xlsx
+narratives_graph/artifacts/*
+!narratives_graph/artifacts/.gitkeep
